@@ -207,6 +207,7 @@ class MaecReport(Report):
             
             #if target malware has virus total scans, add them to the Malware Instance's corresponding STIX file object
             if 'virustotal' in self.results and self.results['virustotal']:
+                file_obj_id = malwareInstance['instance_object_refs'][0]
                 self.package['observable_objects'][file_obj_id]['extensions'] = {}
                 self.package['observable_objects'][file_obj_id]['extensions']['x-maec-avclass'] = self.createAVClassObjList(self.results['virustotal'])
                 
