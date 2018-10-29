@@ -216,7 +216,7 @@ class MaecReport(Report):
                 "type": "malware-instance"
             }
             malwareInstance['id']= "malware-instance--" + str(uuid.uuid4())
-            malawareInstance['instance_object_refs'] = [{
+            malwareInstance['instance_object_refs'] = [{
                 "type":"url",
                 "value": self.results['target']['url']
             }]
