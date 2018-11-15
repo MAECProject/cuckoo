@@ -16,50 +16,50 @@
 # [maecreport]
 # enabled = yes
 
-
+from collections import OrderedDict
+import io
 import json
 import os
 import re
 import uuid
-import io
-from collections import OrderedDict
 
 from cuckoo.common.abstracts import Report
 from cuckoo.common.exceptions import CuckooReportError
 
-
-'''
+# Note: most of the file type strings listed below are not
+# the complete label found in cuckoo report but are substrings
+# found in those labels. For example, "PNG image data" is a
+# substring found in all type labels for .png files. But each
+# .png file type will also have dynamic size info within the label,
+# thus "PNG image data" serves as a catch-all key.
+"""
 Map: cuckoo file type -> mime type
-    Note: most of the file type strings listed below are not
-    the complete label found in cuckoo report but are substrings
-    found in those labels. For example, "PNG image data" is a 
-    substring found in all type labels for .png files. But each 
-    .png file type will also have dynamic size info within the label,
-    thus "PNG image data" serves as a catch-all key.
-'''
+"""
 mime_map = {
-    "PE32 executable":"application/vnd.microsoft.portable-executable",
-    "PNG image data":"image/png",
-    "HTML document":"text/html",
-    "ASCII test":"text/vnd.ascii-art",
-    "UTF-8":"text/plain"
+    "PE32 executable": "application/vnd.microsoft.portable-executable",
+    "PNG image data": "image/png",
+    "HTML document": "text/html",
+    "ASCII test": "text/vnd.ascii-art",
+    "UTF-8": "text/plain"
 }
 
-'''
-Dictionary key sort order, for sorted output
-'''
-sort_order = ["id", "type", "name", "value", "hashes", "path", "size", "parent_directory_ref", "mime_type",
-              "key", "values", "data", "data_type", "src_ref", "src_port", "dst_ref", "dst_port", "protocols",
-              "pid", "created", "parent_ref", "command_line", "service_name", "display_name", "service_type",
-              "binary_ref", "timestamp", "input_object_refs", "output_object_refs", "signature_type",
-              "instance_object_refs", "labels", "capabilities", "dynamic_features", "static_features", "analysis_metadata",
-              "description", "severity", "strings", "process_tree", "is_automated", "analysis_type",
-              "tool_refs", "vm_ref", "summary", "process_ref", "ordinal_position", "initiated_action_refs",
-              "schema_version", "maec_objects", "observable_objects", "relationships",
-              "extensions", "triggered_signatures"]
-'''
-Mappings between Cuckoo Signature names and MAEC Labels
-'''
+"""Dictionary key sort order, for sorted output"""
+sort_order = ["id", "type", "name", "value", "hashes", "path", "size",
+              "parent_directory_ref", "mime_type", "key", "values", "data",
+              "data_type", "src_ref", "src_port", "dst_ref", "dst_port",
+              "protocols", "pid", "created", "parent_ref", "command_line",
+              "service_name", "display_name", "service_type", "binary_ref",
+              "timestamp", "input_object_refs", "output_object_refs",
+              "signature_type", "instance_object_refs", "labels",
+              "capabilities", "dynamic_features", "static_features",
+              "analysis_metadata", "description", "severity", "strings",
+              "process_tree", "is_automated", "analysis_type", "tool_refs",
+              "vm_ref", "summary", "process_ref", "ordinal_position",
+              "initiated_action_refs", "schema_version", "maec_objects",
+              "observable_objects", "relationships", "extensions",
+              "triggered_signatures"]
+
+""""Mappings between Cuckoo Signature names and MAEC Labels"""
 label_mappings = {"trojan": "trojan",
                   "banker": "trojan",
                   "worm": "worm",
@@ -75,29 +75,63 @@ label_mappings = {"trojan": "trojan",
                   "keylogger": "keylogger",
                   "rootkit": "rootkit"}
 
-'''
-Mappings between Cuckoo Signature names and MAEC Capabilities (and refined capabilities)
-'''
-capability_mappings = {"antivm": {"name":"anti-behavioral-analysis", "refined_capabilities":[{"name":"anti-vm"}]},
-                       "antiav": {"name":"anti-detection", "refined_capabilities":[{"name":"anti-virus-evasion"}]},
-                       "antisandbox": {"name":"anti-behavioral-analysis", "refined_capabilities":[{"name":"anti-sandbox"}]},
-                       "persistence": {"name":"persistence"},
-                       "persistance": {"name":"persistence"},
-                       "stealth": {"name":"security-degradation"},
-                       "infostealer": {"name":"data-theft"},
-                       "keylogger": {"name":"spying", "refined_capabilities":[{"name":"input-peripheral-capture"}]},
-                       "antidbg": {"name":"anti-code-analysis", "refined_capabilities":[{"name":"anti-debugging"}]},
-                       "antiemu": {"name":"anti-behavioral-analysis", "refined_capabilities":[{"name":"anti-emulation"}]}}
+"""Mappings between Cuckoo Signature names and MAEC Capabilities
+(and refined capabilities)"""
+capability_mappings = {"antivm": {"name": "anti-behavioral-analysis",
+                           "refined_capabilities": [{"name": "anti-vm"}]},
+                           "antiav": {"name": "anti-detection", "refined_capabilities"
+                           : [{"name": "anti-virus-evasion"}]},
+                           "antisandbox": {"name": "anti-behavioral-analysis",
+                           "refined_capabilities": [{"name" : "anti-sandbox"}]},
+                           "persistence": {"name": "persistence"},
+                           "persistance": {"name": "persistence"},
+                           "stealth": {"name": "security-degradation"},
+                           "infostealer": {"name": "data-theft"},
+                           "keylogger": {"name": "spying", "refined_capabilities"
+                           : [{"name": "input-peripheral-capture"}]},
+                           "antidbg": {"name":"anti-code-analysis", "refined_capabilities"
+                           : [{"name": "anti-debugging"}]},
+                           "antiemu": {"name": "anti-behavioral-analysis", "refined_capabilities"
+                           : [{"name": "anti-emulation"}]}}
+
+def convert_to_unicode(input):
+    """Convert any strings in a dict to UTF-8 Unicode"""
+    if isinstance(input, OrderedDict):
+        od = OrderedDict()
+        for key, value in input.items():
+            od[convert_to_unicode(key)] = convert_to_unicode(value)
+        return od
+    elif isinstance(input, dict):
+        return {convert_to_unicode(key): convert_to_unicode(value)
+                for key, value in input.iteritems()}
+    elif isinstance(input, list):
+        return [convert_to_unicode(element) for element in input]
+    elif isinstance(input, str) or isinstance(input, int) or isinstance(input, float):
+        return unicode(input).decode('utf-8')
+    else:
+        return input
+
+def sort_dict(d):
+    """Sort and return an observed dict for an input dictionary"""
+    od = OrderedDict(sorted(d.iteritems(), key=lambda (k, v): sort_order.index(k)))
+    return od
+
+def _get_mime_type(cuckoo_type_desc):
+    """Map cuckoo file types to a mime type - update "mime_map" accordingly to support more mime types"""
+    for cuckoo_file_type, mime_type in mime_map.items():
+        if cuckoo_file_type in cuckoo_type_desc:
+            return mime_type
+
 
 class MaecReport(Report):
-    '''
+    """
     Generates MAEC 5.0 report.
-    '''
+    """
 
     def run(self,results):
-        '''Writes MAEC5.0 report from Cuckoo results.
+        """Writes MAEC5.0 report from Cuckoo results.
         @param results: Cuckoo results dictionary.
-        '''
+        """
         self.package = {"type": "package",
                         "id": None,
                         "schema_version" : "5.0",
@@ -112,17 +146,16 @@ class MaecReport(Report):
         self.signature_names = []
         self.results = results
         self.setup()
-        self.addDroppedFiles()
-        self.mapAPICalls()
-        self.addProcessTree()
-        self.addSignatures()
-        self.addCapabilities()
+        self.add_dropped_files()
+        self.map_api_calls()
+        self.add_process_tree()
+        self.add_signatures()
+        self.add_capabilities()
         self.output()
 
-    '''
-    Setup core MAEC fields and types
-    '''
+
     def setup(self):
+        """Setup core MAEC fields and types"""
         # Package ID
         self.package['id']= "package--" + str(uuid.uuid4())
         # Load the JSON mappings
@@ -130,46 +163,16 @@ class MaecReport(Report):
         with open(mappings_file) as f:
             self.apiMappings = json.load(f)
         # Set up the primary Malware Instance
-        self.setupPrimaryMalwareInstance()
+        self.setup_primary_malware_instance()
 
-    '''
-    Create and return a Cyber Observable Object ID
-    '''
-    def createObjID(self):
+    def create_obj_id(self):
+        """Create and return a Cyber Observable Object ID"""
         id = str(self.currentObjectIndex)
         self.currentObjectIndex += 1
         return id
 
-    '''
-    Convert any strings in a dict to UTF-8 Unicode
-    '''
-    def convertToUnicode(self, input):
-        if isinstance(input, OrderedDict):
-            od = OrderedDict()
-            for key, value in input.items():
-                od[self.convertToUnicode(key)] = self.convertToUnicode(value)
-            return od
-        elif isinstance(input, dict):
-            return {self.convertToUnicode(key): self.convertToUnicode(value)
-                    for key, value in input.iteritems()}
-        elif isinstance(input, list):
-            return [self.convertToUnicode(element) for element in input]
-        elif isinstance(input, str) or isinstance(input, int) or isinstance(input, float):
-            return unicode(input).decode('utf-8')
-        else:
-            return input
-
-    '''
-    Sort and return an observed dict for an input dictionary
-    '''
-    def sortDict(self, d):
-        od = OrderedDict(sorted(d.iteritems(), key=lambda (k, v): sort_order.index(k)))
-        return od
-
-    '''
-    Create a base Malware Instance
-    '''
-    def createMalwareInstance(self, file_data):
+    def create_malware_instance(self, file_data):
+        """Create a base Malware Instance"""
         malwareInstance = {
             "type": "malware-instance"
         }
@@ -177,40 +180,38 @@ class MaecReport(Report):
         malwareInstance["id"] = "malware-instance--" + str(uuid.uuid4())
 
         # Create file object for the malware instance object
-        file_obj_id, file_obj = self.createFileObj(file_data)
+        file_obj_id, file_obj = self.create_file_obj(file_data)
 
         # Put instance object reference in malware instance
         malwareInstance['instance_object_refs'] = [file_obj_id]
 
         # Insert actual instance object in package.objects
-        self.package['observable_objects'][file_obj_id] = self.sortDict(file_obj)
+        self.package['observable_objects'][file_obj_id] = sort_dict(file_obj)
 
         # Return the Malware Instance
         return malwareInstance
 
-    '''
-    Instantiate the primary (target) Malware Instance
-    '''
-    def setupPrimaryMalwareInstance(self):
+    def setup_primary_malware_instance(self):
+        """Instantiate the primary (target) Malware Instance"""
         malwareInstance = {}
         if "target" in self.results and self.results['target']['category'] == 'file':
-            malwareInstance = self.createMalwareInstance(self.results['target']['file'])
+            malwareInstance = self.create_malware_instance(self.results['target']['file'])
 
             # Add dynamic features
             malwareInstance['dynamic_features'] = {}
-        
+
             # Grab static strings
             if "strings" in self.results and self.results['strings']:
                 malwareInstance["static_features"] = {
                         "strings" : self.results['strings']
                 }
-            
+
             #if target malware has virus total scans, add them to the Malware Instance's corresponding STIX file object
             if 'virustotal' in self.results and self.results['virustotal']:
                 file_obj_id = malwareInstance['instance_object_refs'][0]
                 self.package['observable_objects'][file_obj_id]['extensions'] = {}
-                self.package['observable_objects'][file_obj_id]['extensions']['x-maec-avclass'] = self.createAVClassObjList(self.results['virustotal'])
-                
+                self.package['observable_objects'][file_obj_id]['extensions']['x-maec-avclass'] = self.create_avc_class_obj_list(self.results['virustotal'])
+
         elif "target" in self.results and self.results['target']['category']=='url':
             malwareInstance = {
                 "type": "malware-instance"
@@ -221,11 +222,11 @@ class MaecReport(Report):
                 "value": self.results['target']['url']
             }]
             # Add malwareInstance to package
-            self.package['maec_objects'].append(self.sortDict(malwareInstance))
+            self.package['maec_objects'].append(sort_dict(malwareInstance))
 
         if malwareInstance:
             # Add cuckoo information
-            tool_id = self.createObjID()
+            tool_id = self.create_obj_id()
             tool_dict = OrderedDict()
             tool_dict['type'] = 'software'
             tool_dict['name'] = 'Cuckoo Sandbox'
@@ -238,16 +239,14 @@ class MaecReport(Report):
             if 'machine' in self.results['info'] and 'manager' in self.results['info']['machine']:
                 vm_obj = {'type': 'software',
                           'name': str(self.results['info']['machine']['manager'])}
-                analysis_dict['vm_ref'] = self.deduplicateObj(vm_obj)
+                analysis_dict['vm_ref'] = self.deduplicate_obj(vm_obj)
             analysis_dict['tool_refs'] = [tool_id]
             analysis_dict['description'] = 'Automated analysis conducted by Cuckoo Sandbox'
             malwareInstance['analysis_metadata'] = [analysis_dict]
             self.primaryInstance = malwareInstance
 
-    '''
-    Add any dropped files as Malware Instances along with the corresponding relationships
-    '''
-    def addDroppedFiles(self):
+    def add_dropped_files(self):
+        """Add any dropped files as Malware Instances along with the corresponding relationships"""
         if 'dropped' not in self.results:
             return
 
@@ -258,7 +257,7 @@ class MaecReport(Report):
         for f in self.results['dropped']:
 
             # Create a new Malware Instance for each dropped file
-            malwareInstance = self.createMalwareInstance(f)
+            malwareInstance = self.create_malware_instance(f)
 
             # Add relationship object to connect original malware instance and new malware instance (from dropped file)
             relationship_dict = OrderedDict()
@@ -269,11 +268,9 @@ class MaecReport(Report):
             relationship_dict['relationship_type'] = 'drops'
             self.package['relationships'].append(relationship_dict)
 
-    '''
-    Takes a Cuckoo file dictionary and returns a STIX file object and its reference id
-    '''
-    def createFileObj(self, cuckoo_file_dict):
-        obj_id = self.createObjID()
+    def create_file_obj(self, cuckoo_file_dict):
+        """Takes a Cuckoo file dictionary and returns a STIX file object and its reference id"""
+        obj_id = self.create_obj_id()
         file_obj = {
                 "type":"file",
                 "hashes":{
@@ -289,53 +286,50 @@ class MaecReport(Report):
         if 'ssdeep' in cuckoo_file_dict and cuckoo_file_dict['ssdeep']:
             file_obj['hashes']['ssdeep'] = cuckoo_file_dict['ssdeep']
         if 'type' in cuckoo_file_dict and cuckoo_file_dict['type']:
-            file_obj['mime_type'] = self._get_mime_type(cuckoo_file_dict['type'])
-        
+            file_obj['mime_type'] = _get_mime_type(cuckoo_file_dict['type'])
+
         # If file path given, have to create another STIX object
         # for a directory, then reference it
 
         # Dropped files use the "file_path" field for the actual directory of dropped file
         if 'filepath' in cuckoo_file_dict and cuckoo_file_dict['filepath']:
-            self.createDirectoryFromFilePath(file_obj, cuckoo_file_dict['path'])
+            self.create_directory_from_file_path(file_obj, cuckoo_file_dict['path'])
 
         # Target file uses the "path" field for recording directory
         elif "path" in cuckoo_file_dict and cuckoo_file_dict['path']:
-            self.createDirectoryFromFilePath(file_obj, cuckoo_file_dict['path'])
+            self.create_directory_from_file_path(file_obj, cuckoo_file_dict['path'])
 
         # If file has virusTotal scans, insert them under extensions property
         if 'virustotal' in cuckoo_file_dict and cuckoo_file_dict['virustotal']:
             file_obj['extensions'] = {}
-            file_obj['extensions']['x-maec-avclass'] = self.createAVClassObjList(cuckoo_file_dict['virustotal'])
-            
+            file_obj['extensions']['x-maec-avclass'] = self.create_avc_class_obj_list(cuckoo_file_dict['virustotal'])
+
         return (obj_id, file_obj)
 
-    '''
-    Create and add a Directory to a File
-    '''
-    def createDirectoryFromFilePath(self, file_obj, path):
+    def create_directory_from_file_path(self, file_obj, path):
+        """Create and add a Directory to a File"""
+
         file_name = re.split(r'\\|/', path)[-1]
         # Make sure we have a file name and not just a directory
         if file_name or ('name' in file_obj and file_obj['name'] != path):
             dir_path = path.rstrip(file_name)
-            dir_obj = self.createDirectoryObj(dir_path)
+            dir_obj = self.create_directory_obj(dir_path)
             # Add the file name to the File Object if it does not already exist
             if 'name' not in file_obj or file_obj['name'] == 'null' or '\\' in file_obj['name'] or '/' in file_obj['name']:
                 file_obj['name'] = file_name
             if dir_obj["path"]:
-                dir_obj_id = self.deduplicateObj(dir_obj)
+                dir_obj_id = self.deduplicate_obj(dir_obj)
                 # Insert parent directory reference in file obj
                 file_obj['parent_directory_ref'] = dir_obj_id
         # We actually have a directory and not a file
         else:
-            dir_obj = self.createDirectoryObj(path)
+            dir_obj = self.create_directory_obj(path)
             file_obj['type'] = 'directory'
             file_obj['path'] = dir_obj['path']
             file_obj.pop('name', None)
 
-    '''
-    Create and return a Directory Object from an input path
-    '''
-    def createDirectoryObj(self, dir_path):
+    def create_directory_obj(self, dir_path):
+        """Create and return a Directory Object from an input path"""
         if "\\" in dir_path:
             dir_path = dir_path.rstrip("\\")
         elif "/" in dir_path:
@@ -346,10 +340,8 @@ class MaecReport(Report):
         }
         return dir_obj
 
-    '''
-    Create a Process Object from a Cuckoo Process and add it to the Objects dictionary
-    '''
-    def createProcessObj(self, obj):
+    def create_process_obj(self, obj):
+        """Create a Process Object from a Cuckoo Process and add it to the Objects dictionary"""
         proc_obj = {'type' : 'process'}
         proc_mappings = {'pid' : 'pid',
                          'process_name' : 'name',
@@ -362,12 +354,10 @@ class MaecReport(Report):
         if 'first_seen' in obj:
             proc_obj['created'] = obj['first_seen'].isoformat()
         # Add the process to the PID -> Object map
-        self.pidObjectMap[str(obj['pid'])] = self.deduplicateObj(proc_obj)
+        self.pidObjectMap[str(obj['pid'])] = self.deduplicate_obj(proc_obj)
 
-    '''
-    Add HTTP request data to a Network Traffic Object
-    '''
-    def addHTTPData(self, obj, http_resource, network_obj):
+    def add_http_data(self, obj, http_resource, network_obj):
+        """Add HTTP request data to a Network Traffic Object"""
         http_ext = {"request_method": "GET",
                     "request_value": http_resource,
                     "request_header": {"Host": network_obj['value']}}
@@ -385,10 +375,8 @@ class MaecReport(Report):
         else:
             obj['extensions'] = {'http-request-ext': http_ext}
 
-    '''
-    Create an IPv4, IPv6, MAC, or Domain Name object
-    '''
-    def createNetworkObj(self, value, obj):
+    def create_network_obj(self, value, obj):
+        """Create an IPv4, IPv6, MAC, or Domain Name object"""
         http_resource = None
         network_obj = {'value': value}
         # Determine if we're dealing with an IPv4, IPv6, MAC address or domain name
@@ -424,27 +412,23 @@ class MaecReport(Report):
             network_obj['type'] = 'domain-name'
         # Add the corresponding HTTP extension data to the object
         if http_resource:
-            self.addHTTPData(obj, http_resource, network_obj)
-        network_obj_id = self.deduplicateObj(network_obj)
+            self.add_http_data(obj, http_resource, network_obj)
+        network_obj_id = self.deduplicate_obj(network_obj)
         return network_obj_id
 
-    '''
-    Deduplicate a Cyber Observable Object by checking to see if it already exists in self.objectMap
-    '''
-    def deduplicateObj(self, obj):
+    def deduplicate_obj(self, obj):
+        """Deduplicate a Cyber Observable Object by checking to see if it already exists in self.objectMap"""
         obj_hash = json.dumps(obj, sort_keys=True)
         if obj_hash not in self.objectMap:
-            obj_id = self.createObjID()
-            self.package['observable_objects'][obj_id] = self.sortDict(obj)
+            obj_id = self.create_obj_id()
+            self.package['observable_objects'][obj_id] = sort_dict(obj)
             self.objectMap[obj_hash] = obj_id
             return obj_id
         elif obj_hash in self.objectMap:
             return self.objectMap[obj_hash]
 
-    '''
-    Map the properties of a Cuckoo-reported Object to its STIX Cyber Observable Representation
-    '''
-    def mapObjectProperties(self, obj, mapping_entry, arguments):
+    def map_object_properties(self, obj, mapping_entry, arguments):
+        """Map the properties of a Cuckoo-reported Object to its STIX Cyber Observable Representation"""
         obj_dict = {}
         # Handle object extensions
         if "extension" in mapping_entry:
@@ -472,27 +456,23 @@ class MaecReport(Report):
                     prop = obj_dict[split_props[0]][0]
                     prop[split_props[1]] = arguments[mapping_entry['cuckoo_arg']]
 
-    '''
-    Perform the mappings for input or output objects in an Action
-    '''
-    def mapObjects(self, action, objects_class, mapping, arguments):
+    def map_objects(self, action, objects_class, mapping, arguments):
+        """Perform the mappings for input or output objects in an Action"""
         # Create the Cyber Observable Object
         obj = {}
         obj['type'] = mapping[objects_class][0]['object_type']
         # Populate the properties of the Object
         for entry in mapping[objects_class]:
             if entry['cuckoo_arg'] in arguments and arguments[entry['cuckoo_arg']]:
-                self.mapObjectProperties(obj, entry, arguments)
+                self.map_object_properties(obj, entry, arguments)
         # Make sure that some properties on the Object have actually been set
         if len(obj.keys()) > 1:
             action[objects_class] = []
-            real_obj_id = self.postProcessObject(obj, arguments)
+            real_obj_id = self.post_process_object(obj, arguments)
             action[objects_class].append(real_obj_id)
 
-    '''
-    Perform any necessary post-processing on Cyber Observable Objects
-    '''
-    def postProcessObject(self, obj, arguments):
+    def post_process_object(self, obj, arguments):
+        """Perform any necessary post-processing on Cyber Observable Objects"""
         protocol_mappings = {"1" : "ftp",
                              "3" : "http"}
         reg_datatype_mappings = {"0" : "REG_NONE",
@@ -508,7 +488,7 @@ class MaecReport(Report):
                                  "10" : "REG_RESOURCE_REQUIREMENTS_LIST",
                                  "11" : "REG_QWORD"}
         if obj['type'] == 'file':
-            self.createDirectoryFromFilePath(obj, obj['name'])
+            self.create_directory_from_file_path(obj, obj['name'])
         elif obj['type'] == 'windows-registry-key':
             if 'regkey' in arguments and 'regkey_r' in arguments and 'values' in obj:
                 obj['key'] = obj['key'].replace("\\" + arguments['regkey_r'], "").rstrip()
@@ -520,25 +500,23 @@ class MaecReport(Report):
         elif obj['type'] == 'process':
             if 'filepath' in arguments:
                 file_obj = {"name": arguments['filepath']}
-                self.createDirectoryFromFilePath(file_obj, file_obj['name'])
-                obj['binary_ref'] = self.deduplicateObj(file_obj)
+                self.create_directory_from_file_path(file_obj, file_obj['name'])
+                obj['binary_ref'] = self.deduplicate_obj(file_obj)
         elif obj['type']  == 'network-traffic':
             if 'dst_ref' in obj:
-                obj['dst_ref'] = self.createNetworkObj(obj['dst_ref'], obj)
+                obj['dst_ref'] = self.create_network_obj(obj['dst_ref'], obj)
             if 'src_ref' in obj:
-                obj['src_ref'] = self.createNetworkObj(obj['src_ref'], obj)
+                obj['src_ref'] = self.create_network_obj(obj['src_ref'], obj)
             if 'protocols' in obj:
                 if type(obj['protocols']) is not list:
                     obj['protocols'] = [str(obj['protocols'])]
                 obj['protocols'] = [protocol_mappings[x] if x in protocol_mappings else x for x in obj['protocols']]
         # Check to see if we already have this object stored in our map
         # If so, replace it with a reference to the existing object
-        return self.deduplicateObj(obj)
+        return self.deduplicate_obj(obj)
 
-    '''
-    Create a MAEC Action from a Cuckoo API call
-    '''
-    def mapAPIToAction(self, mapping, call):
+    def map_api_to_action(self, mapping, call):
+        """Create a MAEC Action from a Cuckoo API call"""
         action = {
             "type": "malware-action"
         }
@@ -547,24 +525,22 @@ class MaecReport(Report):
         action['timestamp'] = call['time'].isoformat()
         # Map any input objects
         if 'input_object_refs' in mapping:
-            self.mapObjects(action, "input_object_refs", mapping, call['arguments'])
+            self.map_objects(action, "input_object_refs", mapping, call['arguments'])
         # Map any output objects
         if 'output_object_refs' in mapping:
-            self.mapObjects(action, "output_object_refs", mapping, call['arguments'])
-        self.package['maec_objects'].append(self.sortDict(action))
+            self.map_objects(action, "output_object_refs", mapping, call['arguments'])
+        self.package['maec_objects'].append(sort_dict(action))
         return action['id']
 
-    '''
-    Map a Cuckoo API calls into their MAEC Action equivalent 
-    '''
-    def mapAPICalls(self):
+    def map_api_calls(self):
+        """Map a Cuckoo API calls into their MAEC Action equivalent"""
         for process in self.results.get("behavior", {}).get("processes", []):
             for call in process["calls"]:
                 # Make sure we have a mapping for the call
                 if call['api'] in self.apiMappings:
                     mapping = self.apiMappings[call['api']]
                     # Perform the actual mapping and create the MAEC Action
-                    action_id = self.mapAPIToAction(mapping, call)
+                    action_id = self.map_api_to_action(mapping, call)
                     # Add the Action to the process/action map
                     if str(process['pid']) not in self.pidActionMap:
                         self.pidActionMap[str(process['pid'])] = [action_id]
@@ -572,12 +548,12 @@ class MaecReport(Report):
                         process_actions = self.pidActionMap[str(process['pid'])]
                         process_actions.append(action_id)
 
-    '''
-    Takes the virusTotal scan dictionary for a file (from Cuckoo report).
-    Returns a list of x-maec-avclass objects - this list is
-    meant to be nested in a STIX file object to its "extensions" field
-    '''
-    def createAVClassObjList(self, cuckoo_virusTotal_dict):
+    def create_avc_class_obj_list(self, cuckoo_virusTotal_dict):
+        """
+        Takes the virusTotal scan dictionary for a file (from Cuckoo report).
+        Returns a list of x-maec-avclass objects - this list is
+        meant to be nested in a STIX file object to its "extensions" field
+        """
         avClassList = []
         for vendor, scan_obj in cuckoo_virusTotal_dict['scans'].items():
             # Only grabbing scan information if the vendor detected the scan object
@@ -593,10 +569,8 @@ class MaecReport(Report):
                 avClassList.append(avClassObj)
         return avClassList
 
-    '''
-    Create and return a ProcessTreeNode
-    '''
-    def createProcessTreeNode(self, process, process_children, is_root):
+    def create_process_tree_node(self, process, process_children, is_root):
+        """Create and return a ProcessTreeNode"""
         process_obj = self.package['observable_objects'][self.pidObjectMap[str(process['pid'])]]
         # Add the parent reference to the Process
         if not is_root and 'parent_ref' not in process_obj:
@@ -612,10 +586,8 @@ class MaecReport(Report):
             node["ordinal_position"] = 0
         return node
 
-    '''
-    Build and add the Process Tree to the primary Malware Instance
-    '''
-    def addProcessTree(self):
+    def add_process_tree(self):
+        """Build and add the Process Tree to the primary Malware Instance"""
         process_tree_nodes = []
         process_children = {}
         processes = self.results.get("behavior", {}).get("processes", [])
@@ -631,23 +603,21 @@ class MaecReport(Report):
             # Add the Process Object if it doesn't exist
             # TODO: verify if this actually happens
             if str(process['pid']) not in self.pidObjectMap:
-                self.createProcessObj(process)
+                self.create_process_obj(process)
         # Create the nodes for each Process in the tree
         for process in processes:
             ppid = process['ppid']
             # This is the "root" process
             if str(ppid) not in process_pids:
-                node = self.createProcessTreeNode(process, process_children, True)
+                node = self.create_process_tree_node(process, process_children, True)
                 process_tree_nodes.append(node)
             else:
-                node = self.createProcessTreeNode(process, process_children, False)
+                node = self.create_process_tree_node(process, process_children, False)
                 process_tree_nodes.append(node)
         self.primaryInstance['dynamic_features']['process_tree'] = process_tree_nodes
 
-    '''
-    Add any signatures that were triggered during the analysis
-    '''
-    def addSignatures(self):
+    def add_signatures(self):
+        """Add any signatures that were triggered during the analysis"""
         maec_signatures = []
         signatures = self.results.get('signatures', [])
         for signature in signatures:
@@ -661,10 +631,8 @@ class MaecReport(Report):
         if maec_signatures:
             self.primaryInstance['triggered_signatures'] = maec_signatures
 
-    '''
-    Add any Capabilities or Labels based on the triggered signatures
-    '''
-    def addCapabilities(self):
+    def add_capabilities(self):
+        """Add any Capabilities or Labels based on the triggered signatures"""
         capabilities = []
         # Add any labels or Capabilities
         for name in self.signature_names:
@@ -698,20 +666,11 @@ class MaecReport(Report):
         if capabilities:
             self.primaryInstance['capabilities'] = capabilities
 
-    '''
-    Map cuckoo file types to a mime type - update "mime_map" accordingly to support more mime types
-    '''
-    def _get_mime_type(self, cuckoo_type_desc):
-        for cuckoo_file_type, mime_type in mime_map.items():
-            if cuckoo_file_type in cuckoo_type_desc:
-                return mime_type
-
     def output(self):
         # Add the primary Malware Instance to the package
-        self.package['maec_objects'].append(self.sortDict(self.primaryInstance))
+        self.package['maec_objects'].append(sort_dict(self.primaryInstance))
         # Convert any strings in the dictionary to Unicode
-        unicode_package = self.convertToUnicode(self.package)
+        unicode_package = convert_to_unicode(self.package)
         # Write the report to file
         with io.open(os.path.join(self.reports_path, "report.MAEC-5.0.json"), 'w', encoding='utf-8') as json_file:
-            json_file.write(json.dumps(self.sortDict(unicode_package), ensure_ascii=False, indent=4))
-
+            json_file.write(json.dumps(sort_dict(unicode_package), ensure_ascii=False, indent=4))
