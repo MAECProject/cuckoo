@@ -735,6 +735,8 @@ class Config(object):
                 "username": String(),
                 "password": String(),
             },
+            "maecreport" :
+            { "enabled": Boolean(False) },
             "elasticsearch": {
                 "enabled": Boolean(False),
                 "hosts": List(String, "127.0.0.1"),
