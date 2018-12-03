@@ -1,5 +1,5 @@
 # Copyright (C) 2012-2013 Claudio Guarnieri.
-# Copyright (C) 2014-2017 Cuckoo Foundation.
+# Copyright (C) 2014-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -10,7 +10,7 @@ import tempfile
 
 from cuckoo.common.files import Files
 from cuckoo.common.objects import (
-    Dictionary, File, Archive, YaraMatch, URL_REGEX
+    Dictionary, File, Archive, Buffer, YaraMatch, URL_REGEX
 )
 from cuckoo.core.startup import init_yara
 from cuckoo.main import cuckoo_create
@@ -102,6 +102,13 @@ class TestMagic(object):
             "text/x-python", "text/plain",
         )
 
+    @pytest.mark.skipif("sys.platform != 'linux2'")
+    def test_symlink_magic(self):
+        filepath = tempfile.mktemp()
+        os.symlink(__file__, filepath)
+        assert File(filepath).get_type().startswith("Python script")
+        assert File(filepath).get_content_type() == "text/x-python"
+
 def test_regex():
     r = re.findall(URL_REGEX, "foo http://google.com/search bar")
     assert len(r) == 1
@@ -175,6 +182,26 @@ def test_yara_no_description():
         "description": "this is description",
     }
 
+def test_yara_externals():
+    set_cwd(tempfile.mkdtemp())
+    cuckoo_create()
+    open(cwd("yara", "office", "external.yara"), "wb").write("""
+        rule ExternalRule {
+            condition:
+                filename matches /document.xml/
+        }
+    """)
+    init_yara()
+
+    assert not File(Files.temp_put("")).get_yara("office")
+    assert not File(Files.temp_put("hello")).get_yara("office", {
+        "filename": "hello.jpg",
+    })
+    a, = File(Files.temp_put("hello")).get_yara("office", {
+        "filename": "document.xml",
+    })
+    assert a["name"] == "ExternalRule"
+
 def test_get_urls():
     filepath = Files.temp_put("""
 http://google.com
@@ -207,6 +234,20 @@ class TestArchive(object):
         assert os.path.exists(filepath)
         del f
         assert not os.path.exists(filepath)
+
+class TestBuffer(object):
+    def test_yara_quick(self):
+        set_cwd(tempfile.mkdtemp())
+        cuckoo_create()
+        init_yara()
+
+        buf = (
+            # The SSEXY payload as per vmdetect.yar
+            "66 0F 70 ?? ?? 66 0F DB ?? ?? ?? ?? "
+            "?? 66 0F DB ?? ?? ?? ?? ?? 66 0F EF "
+        )
+        contents = "A"*64 + buf.replace("??", "00").replace(" ", "").decode("hex")
+        assert Buffer(contents).get_yara_quick("binaries") == ["vmdetect"]
 
 class TestPubPrivKeys(object):
     def test_no_keys(self):

@@ -15,7 +15,6 @@ from django.core.exceptions import PermissionDenied, ObjectDoesNotExist
 from django.core.urlresolvers import reverse
 from django.http import HttpResponse
 from django.shortcuts import redirect
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_safe
 
 from cuckoo.core.database import Database, TASK_PENDING
@@ -134,7 +133,6 @@ def filtered_chunk(request, task_id, pid, category):
         "chunk": filtered_process,
     })
 
-@csrf_exempt
 def search_behavior(request, task_id):
     if request.method != "POST":
         raise PermissionDenied
@@ -232,7 +230,9 @@ def file(request, category, object_id, fetch="fetch"):
 
         response = HttpResponse(file_item.read(), content_type=content_type)
 
-        if fetch != "nofetch":
+        if fetch == "plaintext":
+            response["Content-Type"] = "text/plain"
+        elif fetch != "nofetch":
             response["Content-Disposition"] = (
                 "attachment; filename=%s" % file_name
             )
@@ -307,7 +307,6 @@ def _search_helper(obj, k, value):
 
     return r
 
-@csrf_exempt
 def search(request):
     """New Search API using ElasticSearch as backend."""
     if not elastic.enabled:

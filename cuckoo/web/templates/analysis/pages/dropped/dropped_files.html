@@ -17,7 +17,7 @@
                         {% if report.analysis.dropped|length > 0 %}
                             {% for file in report.analysis.dropped %}
                                 <div class="panel panel-default">
-                                    <table class="table table-striped table-condensed">
+                                    <table class="table table-striped table-condensed table-fixed">
                                         <tr>
                                             <th class="col-md-1 text-right">Name</th>
                                             <td>
@@ -112,14 +112,14 @@
              <!-- footer replacement to avoid double scrollbars -->
             <footer class="flex-grid__footer spread-alignment">
                 <p class="footnote">
-                    &copy;2010-2017 <a href="http://www.cuckoosandbox.org" target="_blank">Cuckoo Sandbox</a>
+                    &copy;2010-2018 <a href="https://www.cuckoosandbox.org" target="_blank">Cuckoo Sandbox</a>
                 </p>
                 <div class="logo">
                     <img src="{% static "graphic/cuckoo_inverse.png" %}" alt="Cuckoo Malware Analysis Sandbox" />
                     <a href="#">Back to Top</a>
                 </div>
             </footer>
-            
+
         </section>
     </div>
 

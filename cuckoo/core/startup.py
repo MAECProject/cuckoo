@@ -1,5 +1,5 @@
 # Copyright (C) 2012-2013 Claudio Guarnieri.
-# Copyright (C) 2014-2017 Cuckoo Foundation.
+# Copyright (C) 2014-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -17,15 +17,17 @@ import cuckoo
 from cuckoo.common.colors import red, green, yellow
 from cuckoo.common.config import Config, config, config2
 from cuckoo.common.exceptions import CuckooStartupError, CuckooFeedbackError
+from cuckoo.common.files import temppath
 from cuckoo.common.objects import File
 from cuckoo.core.database import (
     Database, TASK_RUNNING, TASK_FAILED_ANALYSIS, TASK_PENDING
 )
+from cuckoo.core.extract import ExtractManager
 from cuckoo.core.feedback import CuckooFeedbackObject
 from cuckoo.core.log import init_logger
 from cuckoo.core.plugins import RunSignatures
 from cuckoo.core.rooter import rooter
-from cuckoo.misc import cwd, version
+from cuckoo.misc import cwd, version, getuser, mkdir
 
 log = logging.getLogger(__name__)
 
@@ -99,9 +101,9 @@ def check_version():
     print(" Checking for updates...")
 
     try:
-        r = requests.post(
-            "http://api.cuckoosandbox.org/checkversion.php",
-            data={"version": version}
+        r = requests.get(
+            "https://cuckoosandbox.org/updates.json",
+            params={"version": version}, timeout=6
         )
         r.raise_for_status()
         r = r.json()
@@ -109,28 +111,24 @@ def check_version():
         print(red(" Error checking for the latest Cuckoo version: %s!" % e))
         return
 
-    if not isinstance(r, dict) or r.get("error"):
-        print(red(" Error checking for the latest Cuckoo version:"))
-        print(yellow(" Response: %s" % r))
-        return
-
-    rc1_responses = "NEW_VERSION", "NO_UPDATES"
-
-    # Deprecated response.
-    if r.get("response") in rc1_responses and r.get("current") == "2.0-rc1":
-        print(green(" You're good to go!"))
-        return
-
     try:
-        old = StrictVersion(version) < StrictVersion(r.get("current"))
+        old = StrictVersion(version) < StrictVersion(r["version"])
     except ValueError:
         old = True
 
     if old:
-        msg = "Cuckoo Sandbox version %s is available now." % r.get("current")
-        print(red(" Outdated! ") + msg),
+        msg = "Cuckoo Sandbox version %s is available now." % r["version"]
+        print(red(" Outdated! ") + msg)
     else:
         print(green(" You're good to go!"))
+
+    print("\n Our latest blogposts:")
+    for blogpost in r["blogposts"]:
+        print(" * %s, %s." % (yellow(blogpost["title"]), blogpost["date"]))
+        print("   %s" % red(blogpost["oneline"]))
+        print("   More at %s" % blogpost["url"])
+        print("")
+    return r
 
 def init_logging(level):
     """Initializes logging."""
@@ -195,13 +193,16 @@ def init_modules():
             else:
                 log.debug("\t |-- %s", entry.__name__)
 
-    # Initialize the RunSignatures module with all available Signatures.
+    # Initialize the RunSignatures module with all available Signatures and
+    # the ExtractManager with all available Extractors.
     RunSignatures.init_once()
+    ExtractManager.init_once()
 
 def init_yara():
     """Initialize & load/compile Yara rules."""
     categories = (
         "binaries", "urls", "memory", "scripts", "shellcode",
+        "dumpmem", "office",
     )
     log.debug("Initializing Yara...")
     for category in categories:
@@ -233,8 +234,16 @@ def init_yara():
                 rules["rule_%s_%d" % (category, len(rules))] = filepath
                 indexed.append(filename)
 
+        # Need to define each external variable that will be used in the
+        # future. Otherwise Yara will complain.
+        externals = {
+            "filename": "",
+        }
+
         try:
-            File.yara_rules[category] = yara.compile(filepaths=rules)
+            File.yara_rules[category] = yara.compile(
+                filepaths=rules, externals=externals
+            )
         except yara.Error as e:
             raise CuckooStartupError(
                 "There was a syntax error in one or more Yara rules: %s" % e
@@ -244,7 +253,7 @@ def init_yara():
         # rules embedded in it, so create this file to remain compatible.
         if category == "memory":
             f = open(cwd("stuff", "index_memory.yar"), "wb")
-            for filename in indexed:
+            for filename in sorted(indexed):
                 f.write('include "%s"\n' % cwd("yara", "memory", filename))
 
         indexed = sorted(indexed)
@@ -254,9 +263,9 @@ def init_yara():
             else:
                 log.debug("\t |-- %s %s", category, entry)
 
-    # Store the compiled Yara rules for the "memory" category in $CWD/stuff/
-    # so that we may easily pass it along to zer0m0n during an analysis.
-    File.yara_rules["memory"].save(cwd("stuff", "dumpmem.yarac"))
+    # Store the compiled Yara rules for the "dumpmem" category in
+    # $CWD/stuff/ so that we may pass it along to zer0m0n during analysis.
+    File.yara_rules["dumpmem"].save(cwd("stuff", "dumpmem.yarac"))
 
 def init_binaries():
     """Inform the user about the need to periodically look for new analyzer
@@ -404,3 +413,26 @@ def init_routing():
         if config("routing:routing:auto_rt"):
             rooter("flush_rttable", rt_table)
             rooter("init_rttable", rt_table, interface)
+
+def ensure_tmpdir():
+    """Verifies if the current user can read and create files in the
+    cuckoo temporary directory (and creates it, if needed)."""
+    try:
+        if not os.path.isdir(temppath()):
+            mkdir(temppath())
+    except OSError as e:
+        # Currently we only handle EACCES.
+        if e.errno != errno.EACCES:
+            raise
+
+    if os.path.isdir(temppath()) and os.access(temppath(), os.R_OK | os.W_OK):
+        return True
+
+    print red(
+        "Cuckoo cannot read or write files into the temporary directory '%s',"
+        " please make sure the user running Cuckoo has the ability to do so. "
+        "If the directory does not yet exist and the parent directory is "
+        "owned by root, then please create and chown the directory with root."
+        % temppath()
+    )
+    return False

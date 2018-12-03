@@ -1,5 +1,5 @@
 # Copyright (C) 2011-2013 Claudio Guarnieri.
-# Copyright (C) 2014-2017 Cuckoo Foundation.
+# Copyright (C) 2014-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -21,6 +21,7 @@ import zipfile
 from lib.api.process import Process
 from lib.common.abstracts import Package, Auxiliary
 from lib.common.constants import SHUTDOWN_MUTEX
+from lib.common.decide import dump_memory
 from lib.common.defines import KERNEL32
 from lib.common.exceptions import CuckooError, CuckooDisableModule
 from lib.common.hashing import hash_file
@@ -250,8 +251,6 @@ class CommandPipeHandler(object):
                 self.ignore_list["pid"].append(process_id)
             # Spit out an error once and just ignore it further on.
             elif process_id not in self.ignore_list["pid"]:
-                log.debug("Received request to inject pid=%d, but we are "
-                          "already injected there.", process_id)
                 self.ignore_list["pid"].append(process_id)
 
             # We're done operating on the processes list, release the lock.
@@ -336,7 +335,7 @@ class CommandPipeHandler(object):
             return
 
         if self.analyzer.config.options.get("procmemdump"):
-            Process(pid=int(data)).dump_memory()
+            dump_memory(int(data))
 
     def _handle_dumpmem(self, data):
         """Dump the memory of a process as it is right now."""
@@ -344,7 +343,7 @@ class CommandPipeHandler(object):
             log.warning("Received DUMPMEM command with an incorrect argument.")
             return
 
-        Process(pid=int(data)).dump_memory()
+        dump_memory(int(data))
 
     def _handle_dumpreqs(self, data):
         if not data.isdigit():
@@ -637,12 +636,22 @@ class Analyzer(object):
                           module.__name__)
                 aux_enabled.append(aux)
 
+        # Inform zer0m0n of the ResultServer address.
+        zer0m0n.resultserver(self.config.ip, self.config.port)
+
         # Forward the command pipe and logpipe names on to zer0m0n.
         zer0m0n.cmdpipe(self.config.pipe)
         zer0m0n.channel(self.config.logpipe)
 
+        # Hide the Cuckoo Analyzer & Cuckoo Agent.
+        zer0m0n.hidepid(self.pid)
+        zer0m0n.hidepid(self.ppid)
+
         # Initialize zer0m0n with our compiled Yara rules.
         zer0m0n.yarald("bin/rules.yarac")
+
+        # Propagate the requested dump interval, if set.
+        zer0m0n.dumpint(int(self.config.options.get("dumpint", "0")))
 
         # Start analysis package. If for any reason, the execution of the
         # analysis package fails, we have to abort the analysis.
@@ -685,6 +694,9 @@ class Analyzer(object):
                 # If the process monitor is enabled we start checking whether
                 # the monitored processes are still alive.
                 if pid_check:
+                    # We also track the PIDs provided by zer0m0n.
+                    self.process_list.add_pids(zer0m0n.getpids())
+
                     for pid in self.process_list.pids:
                         if not Process(pid=pid).is_alive():
                             log.info("Process with pid %s has terminated", pid)

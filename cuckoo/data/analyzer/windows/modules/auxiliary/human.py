@@ -1,5 +1,5 @@
 # Copyright (C) 2012-2013 Claudio Guarnieri.
-# Copyright (C) 2014-2017 Cuckoo Foundation.
+# Copyright (C) 2014-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -21,8 +21,13 @@ RESOLUTION = {
     "y": USER32.GetSystemMetrics(1)
 }
 
+def click(hwnd):
+    USER32.SetForegroundWindow(hwnd)
+    KERNEL32.Sleep(1000)
+    USER32.SendMessageW(hwnd, BM_CLICK, 0, 0)
+
 def foreach_child(hwnd, lparam):
-    # List of buttons labels to click.
+    # List of partial buttons labels to click.
     buttons = [
         "yes", "oui",
         "ok",
@@ -32,6 +37,7 @@ def foreach_child(hwnd, lparam):
         "install", "installer",
         "file", "fichier",
         "run", "start", "marrer", "cuter",
+        "extract",
         "i agree", "accepte",
         "enable", "activer", "accord", "valider",
         "don't send", "ne pas envoyer",
@@ -46,13 +52,18 @@ def foreach_child(hwnd, lparam):
         "launch", "lancer",
         "save", "sauvegarder",
         "download", "load", "charger",
-        "end", "fin", "terminer"
+        "end", "fin", "terminer",
         "later",
         "finish",
         "end",
         "allow access",
         "remind me later",
         "save", "sauvegarder"
+    ]
+
+    # List of complete button texts to click. These take precedence.
+    buttons_complete = [
+        "&Ja",  # E.g., Dutch Office Word 2013.
     ]
 
     # List of buttons labels to not click.
@@ -71,6 +82,11 @@ def foreach_child(hwnd, lparam):
         text = create_unicode_buffer(length + 1)
         USER32.SendMessageW(hwnd, WM_GETTEXT, length + 1, text)
 
+        if text.value in buttons_complete:
+            log.info("Found button %r, clicking it" % text.value)
+            click(hwnd)
+            return True
+
         # Check if the button is set as "clickable" and click it.
         textval = text.value.replace("&", "").lower()
         for button in buttons:
@@ -80,9 +96,7 @@ def foreach_child(hwnd, lparam):
                         break
                 else:
                     log.info("Found button %r, clicking it" % text.value)
-                    USER32.SetForegroundWindow(hwnd)
-                    KERNEL32.Sleep(1000)
-                    USER32.SendMessageW(hwnd, BM_CLICK, 0, 0)
+                    click(hwnd)
 
     # Recursively search for childs (USER32.EnumChildWindows).
     return True

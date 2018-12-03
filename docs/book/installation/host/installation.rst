@@ -65,6 +65,11 @@ looks roughly as follows::
     (venv)$ pip install -U pip setuptools
     (venv)$ pip install -U cuckoo
 
+.. note::
+    Depending on how you have set up your environment (virtualenvs etc.) you
+    may need to specify the version of ``pip`` to use. Just replace ``pip``
+    in the commands above with ``pip2``.
+
 Some reasons for using a ``virtualenv``:
 
 * Cuckoo's dependencies may not be entirely up-to-date, but instead pin to a
@@ -109,3 +114,11 @@ such one should be able to - in theory - install Cuckoo completely offline
 using those files, i.e., by executing something like the following::
 
     $ pip install *.tar.gz
+
+Build/Install Cuckoo from source
+================================
+
+By cloning Cuckoo Sandbox from our `official repository`_, you can install it from source.
+After cloning, follow the steps mentioned in :doc:`../../development/package` to start the installation.
+
+.. _`official repository`: https://github.com/cuckoosandbox/cuckoo

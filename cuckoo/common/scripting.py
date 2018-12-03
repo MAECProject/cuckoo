@@ -1,4 +1,4 @@
-# Copyright (C) 2017 Cuckoo Foundation.
+# Copyright (C) 2017-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -57,7 +57,10 @@ class Scripting(object):
         raise NotImplementedError
 
 class CmdExe(Scripting):
-    EXE_REGEX = "cmd(\\.exe)?$"
+    EXE_REGEX = (
+        "([\"]?C:(\\\\)+Windows(\\\\)+System32(\\\\)+)?"
+        "cmd(\\.exe)?[\"]?$"
+    )
 
     program = "cmd"
     ext = "bat"
@@ -67,11 +70,28 @@ class CmdExe(Scripting):
 
         idx, ret = 1, {}
 
+        # Strip off surrounding quotes.
+        if len(cmdline) == 2 and cmdline[1].startswith('"'):
+            cmdline = self.shlex(cmdline[1][1:-1])
+            idx = 0
+
         while idx < len(cmdline):
-            if cmdline[idx] == "/c":
+            if cmdline[idx] == "/c" or cmdline[idx] == "/C":
+                ret["remains"] = False
                 ret["command"] = cmdline[idx+1:]
                 self.parse_command(cmdline[idx+1:])
                 break
+
+            if cmdline[idx] == "/k" or cmdline[idx] == "/K":
+                ret["remains"] = True
+                ret["command"] = cmdline[idx+1:]
+                self.parse_command(cmdline[idx+1:])
+                break
+
+            if cmdline[idx] == "/q" or cmdline[idx] == "/Q":
+                ret["quiet"] = True
+                idx += 1
+                continue
 
             log.warning(
                 "Unhandled cmd.exe command-line argument(s): %s",
