@@ -1,4 +1,4 @@
-# Copyright (c) 2017, The MITRE Corporation
+# Copyright (C) 2014-2017 Cuckoo Foundation.
 # All rights reserved.
 
 # MAEC 5.0 Cuckoo Report Module
@@ -223,8 +223,7 @@ class MaecReport(Report):
             # Instance's corresponding STIX file object
             if 'virustotal' in self.results and self.results['virustotal']:
                 file_obj_id = malwareInstance['instance_object_refs'][0]
-                self.package['observable_objects'][
-                    file_obj_id]['extensions'] = {}
+                self.package['observable_objects'][file_obj_id]['extensions'] = {}
                 self.package['observable_objects'][file_obj_id]['extensions'][
                     'x-maec-avclass'] =  \
                     self.create_avc_class_obj_list(self.results['virustotal'])
