@@ -329,7 +329,6 @@ class MaecReport(Report):
             file_obj['extensions'] = {}
             file_obj['extensions']['x-maec-avclass'] = \
                 self.create_avc_class_obj_list(cuckoo_file_dict['virustotal'])
-
         return (obj_id, file_obj)
 
     def create_directory_from_file_path(self, file_obj, path):
