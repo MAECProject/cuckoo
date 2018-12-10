@@ -1,4 +1,5 @@
-# Copyright (C) 2014-2017 Cuckoo Foundation.
+# Copyright (C) 2017 The MITRE Corporation.
+# Copyright (C) 2018 Cuckoo Foundation.
 # All rights reserved.
 # MAEC 5.0 Cuckoo Report Module
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
