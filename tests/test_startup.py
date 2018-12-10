@@ -1,23 +1,27 @@
-# Copyright (C) 2017 Cuckoo Foundation.
+# Copyright (C) 2017-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
 import mock
+import json
 import os
 import pytest
 import responses
 import shutil
+import subprocess
+import sys
 import tempfile
 
 from cuckoo.common.abstracts import (
     Auxiliary, Machinery, Processing, Signature, Report
 )
 from cuckoo.common.exceptions import CuckooStartupError
+from cuckoo.common.files import temppath
 from cuckoo.common.objects import File
 from cuckoo.core.database import Database
 from cuckoo.core.startup import (
     init_modules, check_version, init_rooter, init_routing, init_yara,
-    init_tasks, init_binaries
+    init_tasks, init_binaries, ensure_tmpdir
 )
 from cuckoo.main import cuckoo_create
 from cuckoo.misc import set_cwd, load_signatures, cwd, is_linux
@@ -140,48 +144,13 @@ def test_check_version_disabled(capsys):
     assert "Checking for" not in out
 
 @responses.activate
-def test_version_20rc1(capsys):
-    set_cwd(tempfile.mkdtemp())
-    responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
-        status=200, json={
-            "error": False,
-            "current": "2.0-rc1",
-            "response": "NEW_VERSION",
-        }
-    )
-
-    check_version()
-    out, err = capsys.readouterr()
-    assert "Checking for" in out
-    assert "You're good to go" in out
-
-@responses.activate
-def test_version_20rc1_noupd(capsys):
-    set_cwd(tempfile.mkdtemp())
-    responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
-        status=200, json={
-            "error": False,
-            "current": "2.0-rc1",
-            "response": "NO_UPDATES",
-        }
-    )
-
-    check_version()
-    out, err = capsys.readouterr()
-    assert "Checking for" in out
-    assert "You're good to go" in out
-
-@responses.activate
 def test_version_newer(capsys):
     set_cwd(tempfile.mkdtemp())
     responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
+        responses.GET, "https://cuckoosandbox.org/updates.json",
         status=200, json={
-            "error": False,
-            "current": "20.0.0",
-            "response": "NEW_VERSION",
+            "version": "20.0.0",
+            "blogposts": [],
         }
     )
 
@@ -195,11 +164,10 @@ def test_version_newer(capsys):
 def test_version_garbage(capsys):
     set_cwd(tempfile.mkdtemp())
     responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
+        responses.GET, "https://cuckoosandbox.org/updates.json",
         status=200, json={
-            "error": False,
-            "current": "thisisnotaversion",
-            "response": "NEW_VERSION",
+            "version": "thisisnotaversion",
+            "blogposts": [],
         }
     )
 
@@ -215,21 +183,8 @@ def test_version_garbage(capsys):
 def test_version_resp404(capsys):
     set_cwd(tempfile.mkdtemp())
     responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
+        responses.GET, "https://cuckoosandbox.org/updates.json",
         status=404
-    )
-
-    check_version()
-    out, err = capsys.readouterr()
-    assert "Checking for" in out
-    assert "Error checking for" in out
-
-@responses.activate
-def test_version_respinvld(capsys):
-    set_cwd(tempfile.mkdtemp())
-    responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
-        status=200, json=["this is not a dictionary"]
     )
 
     check_version()
@@ -241,7 +196,7 @@ def test_version_respinvld(capsys):
 def test_version_respnotjson(capsys):
     set_cwd(tempfile.mkdtemp())
     responses.add(
-        responses.POST, "http://api.cuckoosandbox.org/checkversion.php",
+        responses.GET, "https://cuckoosandbox.org/updates.json",
         status=200, body="thisisnotevenjson"
     )
 
@@ -640,5 +595,52 @@ class TestYaraIntegration(object):
         File.yara_rules = {}
         shutil.rmtree(cwd("yara", "binaries"))
         init_yara()
-        assert len(File.yara_rules) == 5
+        assert len(File.yara_rules) == 7
         assert not list(File.yara_rules["binaries"])
+
+def test_tmp_permissions_true():
+    set_cwd(tempfile.mkdtemp())
+    cuckoo_create(cfg={
+        "cuckoo": {
+            "cuckoo": {
+                "tmppath": tempfile.mkdtemp(),
+            }
+        }
+    })
+    assert os.path.isdir(temppath())
+
+@pytest.mark.skipif("sys.platform != 'linux2'")
+def test_tmp_permissions_false():
+    set_cwd(tempfile.mkdtemp())
+    dirpath = tempfile.mkdtemp()
+    cuckoo_create(cfg={
+        "cuckoo": {
+            "cuckoo": {
+                "tmppath": dirpath,
+            }
+        }
+    })
+    os.chmod(dirpath, 0400)
+    assert not ensure_tmpdir()
+
+def test_light_startup():
+    fetch_imports = (
+        "import json, sys ; "
+        "import cuckoo ; "
+        "from cuckoo.main import main ; "
+        "print json.dumps(sys.modules.keys())"
+    )
+    out, err = subprocess.Popen(
+        [sys.executable, "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
+    ).communicate(fetch_imports)
+
+    assert not err
+    modules = json.loads(out)
+    assert "androguard" not in modules
+    assert "capstone" not in modules
+    assert "django" not in modules
+    assert "elasticsearch" not in modules
+    assert "pkg_resources" not in modules
+    assert "pymisp" not in modules
+    assert "scapy" not in modules
+    assert "weasyprint" not in modules

@@ -1,9 +1,10 @@
-# Copyright (C) 2016-2017 Cuckoo Foundation.
+# Copyright (C) 2016-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
 import ctypes
 import logging
+import socket
 import struct
 
 from lib.common.defines import (
@@ -24,9 +25,6 @@ class Ioctl(object):
         self.pipepath = pipepath
 
     def invoke(self, ctlcode, value, outlength=0x1000):
-        # TODO Enable the kernel drivers.
-        return
-
         device_handle = KERNEL32.CreateFileA(
             "\\\\.\\%s" % self.pipepath, GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None
@@ -67,6 +65,10 @@ class Zer0m0nIoctl(Ioctl):
         "channel",
         "dumpmem",
         "yarald",
+        "getpids",
+        "hidepid",
+        "dumpint",
+        "resultserver",
     ]
 
     def invoke(self, action, buf):
@@ -78,7 +80,7 @@ class Zer0m0nIoctl(Ioctl):
         )
 
     def addpid(self, pid):
-        return self.invoke("addpid", struct.pack("I", pid))
+        return self.invoke("addpid", struct.pack("Q", pid))
 
     def cmdpipe(self, pipe):
         return self.invoke("cmdpipe", "\x00".join(pipe + "\x00"))
@@ -87,9 +89,31 @@ class Zer0m0nIoctl(Ioctl):
         return self.invoke("channel", "\x00".join(pipe + "\x00"))
 
     def dumpmem(self, pid):
-        return self.invoke("dumpmem", struct.pack("I", pid))
+        return self.invoke("dumpmem", struct.pack("Q", pid))
 
     def yarald(self, rulepath):
         return self.invoke("yarald", open(rulepath, "rb").read())
+
+    def getpids(self):
+        pids = self.invoke("getpids", "pids") or ""
+        return struct.unpack("Q"*(len(pids)/8), pids)
+
+    def hidepid(self, pid):
+        return self.invoke("hidepid", struct.pack("Q", pid))
+
+    def dumpint(self, ms):
+        return self.invoke("dumpint", struct.pack("I", ms))
+
+    def resultserver(self, ip, port):
+        # Just a regular SOCKADDR structure, up to 128 bytes
+        if ":" in ip:
+            rs = struct.pack("<H", socket.AF_INET6)
+            rs += struct.pack("!H", port)
+            rs += socket.inet_pton(socket.AF_INET6, ip)
+        else:
+            rs = struct.pack("<H", socket.AF_INET)
+            rs += struct.pack("!H", port)
+            rs += socket.inet_aton(ip)
+        return self.invoke("resultserver", rs)
 
 zer0m0n = Zer0m0nIoctl(driver_name)

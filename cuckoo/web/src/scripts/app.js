@@ -27,11 +27,52 @@ class CuckooWeb {
         return bytes.toFixed(1)+' '+units[u];
     }
 
-    static api_post(url, params, callback, errback, beforesend){
+    static csrf_token() {
+        let token = Cookies.get("csrftoken");
+        if(!token) {
+            // Fallback. Maybe there is a form on the page?
+            let field = $("input[name=csrfmiddlewaretoken]");
+            if(field && field.val()) {
+                token = field.val();
+            }
+        }
+        return token;
+    }
+
+    // Wrapper that adds support for CSRF tokens
+    static ajax(args) {
+        if(args.type !== "get") {
+            const token = CuckooWeb.csrf_token();
+            if(!token) {
+                console.warn("Request to " + args.url + " on page without CSRF token");
+            }
+            const beforeSend = args.beforeSend;
+            args.beforeSend = function(request) {
+                if(token)
+                    request.setRequestHeader("X-CSRFToken", token);
+                if(beforeSend)
+                    beforeSend(request);
+            }
+        }
+        return $.ajax(args);
+    }
+
+    // Form
+    static post(url, data, success) {
+        return CuckooWeb.ajax({
+            url: url,
+            type: "post",
+            data: data,
+            success: success
+        });
+    }
+
+    // JSON
+    static api_post(url, params, callback, errback, beforesend, silent = true){
 
         let data = JSON.stringify(params);
 
-        $.ajax({
+        CuckooWeb.ajax({
             type: "post",
             contentType: "application/json",
             url: url,
@@ -50,14 +91,31 @@ class CuckooWeb {
             }
         }).fail(function(err){
 
-            if(err.hasOwnProperty("responseJSON") && err.responseJSON.hasOwnProperty("message")){
-                console.log(`POST err: ${err.responseJSON.message}`);
-            } else {
-                console.log(`POST err: ${err}`);
+            // if not silent, spit out error details
+            if(!silent) {
+
+              // if a responseJSON is sent with an error object, highlight that property
+              if(err.responseJSON !== undefined && err.responseJSON.hasOwnProperty("message")){
+                if(!silent) {
+                  console.log('XHR error RMessage:');
+                  console.log(err.responseJSON.message);
+                }
+              }
+
+              // always display XHR error status
+              console.log(`XHR error details: `);
+              console.log(err);
+
+              // also try to show xhr status message
+              if(err.statusText) {
+                console.log(`XHR: StatusText: ${err.statusText}`);
+              }
+
             }
 
+            // if a callback is given, do the callback.
             if(errback) {
-                errback(err);
+              errback(err);
             }
         });
     }
@@ -183,6 +241,84 @@ class CuckooWeb {
       t.innerHTML = string;
       return t.value;
 
+    }
+
+    /*
+      Below are a bunch of polyfilled helpers for the JS Fullscreen API. since
+      each are quite browser-specific
+     */
+
+    // able to use fullscreen (does the user allow it in the browser config)
+    static enabledFullscreen() {
+      if(document.fullscreenEnabled) {
+        return document.fullscreenEnabled;
+      } else if(document.webkitFullscreenEnabled) {
+        return document.webkitFullscreenEnabled;
+      } else if (document.mozFullscreenEnabled) {
+        return document.mozFullscreenEnabled;
+      } else {
+        // ...
+        return false;
+      }
+    }
+
+    static isFullscreen() {
+      if(document.fullscreen) {
+        return document.fullscreen;
+      } else if(document.webkitIsFullScreen) {
+        return document.webkitIsFullScreen;
+      } else if(document.mozIsFullScreen) {
+        return document.mozIsFullScreen;
+      } else if(document.msIsFullScreen) {
+        return document.msIsFullScreen;
+      } else {
+        // ...
+        return false;
+      }
+    }
+
+    static exitFullscreen() {
+      if(document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if(document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      } else if(document.mozExitFullscreen) {
+        document.mozExitFullscreen();
+      } else if(document.msExitFullscreen) {
+        document.msExitFullscreen();
+      } else {
+        // the message has already been given in the request handler
+        return false;
+      }
+    }
+
+    // shortcuts requestFullscreen as cross-browser as possible
+    static requestFullscreen(element) {
+      if(CuckooWeb.enabledFullscreen()) {
+        if(element.requestFullscreen) {
+          element.requestFullscreen();
+        } else if(element.webkitRequestFullscreen) {
+          element.webkitRequestFullscreen();
+        } else if (element.mozRequestFullscreen) {
+          element.mozRequestFullscreen();
+        } else if (element.msRequestFullscreen) {
+          element.msRequestFullscreen();
+        } else {
+          console.log('Oh noes! you cannot go in fullscreen due to your browser.');
+          return false;
+        }
+      } else {
+        console.log('You did not enable fullscreen in your browser config. you cannot use this feature.');
+        return false;
+      }
+    }
+
+    // shortcuts fullscreen event handling
+    static onFullscreenChange(handler = function(){}) {
+      document.addEventListener('webkitfullscreenchange', handler, false);
+      document.addEventListener('fullscreenchange', handler, false);
+      document.addEventListener('mozfullscreenchange', handler, false)
+      document.addEventListener('msfullscreenchange', handler, false);
     }
 
 }
@@ -510,37 +646,23 @@ class DashboardTable {
         var _this = this;
         var limit = parseInt(this.options.limit);
 
-        $.ajax({
-            type: "POST",
-            url: "/analysis/api/tasks/recent/",
-            contentType: "application/json",
-            dataType: "json",
-            data: JSON.stringify({
-                cats: [],
-                limit: isNaN(limit) ? 3 : limit,
-                offset: 0,
-                packs: [],
-                score: ""
-            }),
-            success: function(response) {
-
-            	if(response.tasks && $.isArray(response.tasks)) {
-
-            		response = response.tasks.map(function(item) {
-	                    if(item.added_on) item.added_on = moment(item.added_on).format('DD/MM/YYYY');
-	                    return item;
-	                });
-
-            	} else {
-
-            		response = [];
-
-            	}
-
-                _this.afterLoad(response);
+        CuckooWeb.api_post("/analysis/api/tasks/recent/", {
+            cats: [],
+            limit: isNaN(limit) ? 3 : limit,
+            offset: 0,
+            packs: [],
+            score: ""
+        }, function(response) {
+            if(response.tasks && $.isArray(response.tasks)) {
+                response = response.tasks.map(function(item) {
+                    if(item.added_on) item.added_on = moment(item.added_on).format('DD/MM/YYYY');
+                        return item;
+                    });
+            } else {
+                response = [];
             }
+            _this.afterLoad(response);
         });
-
     }
 
     afterLoad(data) {
@@ -735,76 +857,114 @@ $(function() {
         // // retrieve general info about cuckoo
         $.get('/cuckoo/api/status', function(data) {
 
-            // populate tasks information
-            var tasks_info = DashboardTable.simpleTable(data.data.tasks);
-            $('[data-populate="statistics"]').html(tasks_info);
+          // ***
+          // cuckoo quickview tables
+          // ***
+          var tasks_info = DashboardTable.simpleTable(data.data.tasks);
+          $('[data-populate="statistics"]').html(tasks_info);
 
-            if(data.data.diskspace.analyses) {
-                // populate free disk space unit
-                var disk_space = createChart($("#ds-stat > canvas"), data.data.diskspace.analyses);
-                $('[data-populate="free-disk-space"]').text(disk_space.free);
-                $('[data-populate="total-disk-space"]').text(disk_space.total);
+          // ***
+          // cuckoo disk space usage chart
+          // ***
+          if(data.data.diskspace.analyses) {
+              // populate free disk space unit
+              var disk_space = createChart($("#ds-stat > canvas"), data.data.diskspace.analyses);
+              $('[data-populate="free-disk-space"]').text(disk_space.free);
+              $('[data-populate="total-disk-space"]').text(disk_space.total);
 
-            } else {
-                // show 'no data available' if this data is not available
-                $("#ds-stat").addClass('no-data');
-            }
+          } else {
+              // show 'no data available' if this data is not available
+              $("#ds-stat").addClass('no-data');
+          }
 
 
-            // cpu load chart
-            if(data.data.cpucount) {
+          // ***
+          // cuckoo cpu usage chart
+          // ***
+          if(data.data.cpucount) {
 
-                // cpu load calculation mechanism
-                var cores = data.data.cpucount;
-                var lsum = 0;
-                for(var load in data.data.cpuload) {
-                    lsum += data.data.cpuload[load];
-                }
-                var avgload = parseInt(
-                    lsum / data.data.cpuload.length * 100 / cores
-                );
-                $('[data-populate="cpu-load"]').text(`${avgload}%`);
-                $('[data-populate="total-cores"]').text(`${cores} cores`);
+              // cpu load calculation mechanism
+              var cores = data.data.cpucount;
+              var lsum = 0;
+              for(var load in data.data.cpuload) {
+                  lsum += data.data.cpuload[load];
+              }
+              var avgload = parseInt(
+                  lsum / data.data.cpuload.length * 100 / cores
+              );
+              $('[data-populate="cpu-load"]').text(`${avgload}%`);
+              $('[data-populate="total-cores"]').text(`${cores} cores`);
 
-                // populate cpu load unit
-                var cpu_load = createChart($("#cpu-stat > canvas"), {
-                    total: cores * 100,
-                    used: avgload,
-                    free: 100 - avgload,
-                });
+              // populate cpu load unit
+              var cpu_load = createChart($("#cpu-stat > canvas"), {
+                  total: cores * 100,
+                  used: avgload,
+                  free: 100 - avgload,
+              });
 
-            } else {
-                // show 'no data available' if this data is not available
-                $("#cpu-stat").addClass('no-data');
-            }
+          } else {
+              // show 'no data available' if this data is not available
+              $("#cpu-stat").addClass('no-data');
+          }
 
-            // data.data.memtotal = 11989568;
-            // data.data.memavail = 2899792;
+          // ***
+          // cuckoo memory usage chart
+          // ***
+          if(data.data.memtotal) {
 
-            // memory chart
-            if(data.data.memtotal) {
+              // memory data
+              var memoryTotal = data.data.memtotal;
+              var memoryAvail = data.data.memavail;
 
-                // memory data
-                var memoryTotal = data.data.memtotal;
-                var memoryAvail = data.data.memavail;
+              // create the memory chart
+              var memory_chart = createChart($("#memory-stat > canvas"), {
+                  total: memoryTotal,
+                  used: memoryTotal - memoryAvail,
+                  free: memoryAvail
+              }, true);
 
-                // create the memory chart
-                var memory_chart = createChart($("#memory-stat > canvas"), {
-                    total: memoryTotal,
-                    used: memoryTotal - memoryAvail,
-                    free: memoryAvail
-                }, true);
+              var memoryTotalSize = CuckooWeb.human_size(memoryTotal * 1000);
+              var memoryAvailSize = CuckooWeb.human_size(memoryAvail * 1000);
+              var memoryUsedSize = CuckooWeb.human_size((memoryTotal - memoryAvail) * 1000);
 
-                var memoryTotalSize = CuckooWeb.human_size(memoryTotal * 1000);
-                var memoryAvailSize = CuckooWeb.human_size(memoryAvail * 1000);
-                var memoryUsedSize = CuckooWeb.human_size((memoryTotal - memoryAvail) * 1000);
+              $('[data-populate="memory-used"]').text(`${memoryAvailSize}`);
+              $('[data-populate="memory-total"]').text(`${memoryTotalSize}`);
 
-                $('[data-populate="memory-used"]').text(`${memoryAvailSize}`);
-                $('[data-populate="memory-total"]').text(`${memoryTotalSize}`);
+          } else {
+              $("#memory-stat").addClass('no-data');
+          }
 
-            } else {
-                $("#memory-stat").addClass('no-data');
-            }
+          // ***
+          // cuckoo versioning block
+          // ***
+          let $versionBlock = $("[data-dashboard-module='installation']");
+
+          let vCur = data.data.version;
+          let vNew = data.data.latest_version;
+
+          // check existence and compare
+          if((vCur && vNew) && (vCur !== vNew)) {
+            // go into 'attention - you need to update' mode if we're not on the latest version
+            $versionBlock
+              .addClass('attention')
+              .find('.latest-version td:last-child')
+              .text(vNew)
+              .parents('tr').show();
+          } else {
+            // show the 'you are up to date message' when the version is the same
+            $versionBlock
+              .find('.up-to-date')
+              .show();
+          }
+
+          $versionBlock.addClass('version-loaded');
+
+          // ***
+          // cuckoo recent blogposts block
+          // ***
+          let $blogBlock = $("[data-dashboard-module='blogposts']");
+          let blogTmpl = Handlebars.compile($blogBlock.find('template#blogpost-template').html());
+          $blogBlock.find('.dashboard-module__body').html(blogTmpl({ posts: data.data.blogposts }));
 
         });
 
@@ -857,7 +1017,7 @@ $(function() {
     });
 
 
-    if(hljs) {
+    if(window.hljs) {
       // initialise hljs
       hljs.configure({
           languages: ['js']

@@ -1,5 +1,5 @@
 # Copyright (C) 2012-2013 Claudio Guarnieri.
-# Copyright (C) 2014-2017 Cuckoo Foundation.
+# Copyright (C) 2014-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -8,14 +8,17 @@ import ctypes
 import datetime
 import logging
 import oletools.olevba
+import oletools.oleobj
 import os
 import peepdf.JSAnalysis
 import peepdf.PDFCore
 import pefile
 import peutils
 import re
+import sflock
 import struct
 import zipfile
+import zlib
 
 try:
     import M2Crypto
@@ -23,19 +26,12 @@ try:
 except ImportError:
     HAVE_MCRYPTO = False
 
-try:
-    import PyV8
-    HAVE_PYV8 = True
-
-    PyV8  # Fake usage.
-except:
-    HAVE_PYV8 = False
-
 from cuckoo.common.abstracts import Processing
 from cuckoo.common.objects import Archive, File
+from cuckoo.common.structures import LnkHeader, LnkEntry
 from cuckoo.common.utils import convert_to_printable, to_unicode, jsbeautify
-from cuckoo.compat import magic
-from cuckoo.misc import cwd, dispatch, Structure
+from cuckoo.core.extract import ExtractManager
+from cuckoo.misc import cwd, dispatch
 
 from elftools.common.exceptions import ELFError
 from elftools.elf.constants import E_FLAGS
@@ -71,7 +67,7 @@ class PortableExecutable(object):
         @param data: data to be analyzed.
         @return: file type or None.
         """
-        return magic.from_buffer(data)
+        return sflock.magic.from_buffer(data)
 
     def _get_peid_signatures(self):
         """Gets PEID signatures.
@@ -466,15 +462,16 @@ class OfficeDocument(object):
 
     eps_comments = "\\(([\\w\\s]+)\\)"
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, task_id):
         self.filepath = filepath
         self.files = {}
+        self.ex = ExtractManager.for_task(task_id)
 
     def get_macros(self):
         """Get embedded Macros if this is an Office document."""
         try:
             p = oletools.olevba.VBA_Parser(self.filepath)
-        except TypeError:
+        except (TypeError, oletools.olevba.FileOpenError, zlib.error):
             return
 
         # We're not interested in plaintext.
@@ -529,6 +526,8 @@ class OfficeDocument(object):
     def run(self):
         self.unpack_docx()
 
+        self.ex.peek_office(self.files)
+
         return {
             "macros": list(self.get_macros()),
             "eps": self.extract_eps(),
@@ -541,15 +540,28 @@ class PdfDocument(object):
         self.filepath = filepath
 
     def _parse_string(self, s):
-        # Big endian.
-        if s.startswith(u"\xfe\xff"):
-            return s[2:].encode("latin-1").decode("utf-16be")
+        if isinstance(s, unicode):
+            # Big endian.
+            if s.startswith(u"\xfe\xff"):
+                return s[2:].encode("latin-1").decode("utf-16be")
 
-        # Little endian.
-        if s.startswith(u"\xff\xfe"):
-            return s[2:].encode("latin-1").decode("utf-16le")
+            # Little endian.
+            if s.startswith(u"\xff\xfe"):
+                return s[2:].encode("latin-1").decode("utf-16le")
 
-        return s
+        if isinstance(s, str):
+            # Big endian.
+            if s.startswith("\xfe\xff"):
+                return s[2:].decode("utf-16be")
+
+            # Little endian.
+            if s.startswith("\xff\xfe"):
+                return s[2:].decode("utf-16le")
+
+        try:
+            return s.decode("latin-1")
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            return s
 
     def _sanitize(self, d, key):
         return self._parse_string(d.get(key, "").decode("latin-1"))
@@ -566,7 +578,7 @@ class PdfDocument(object):
             uri_obj = obj.elements.get("/URI")
             if uri_obj:
                 if isinstance(uri_obj, peepdf.PDFCore.PDFString):
-                    entry["urls"].append(uri_obj.value)
+                    entry["urls"].append(self._parse_string(uri_obj.value))
                 else:
                     log.warning(
                         "Identified a potential URL, but its associated "
@@ -591,14 +603,29 @@ class PdfDocument(object):
 
         ref = obj.object.elements["/JS"]
 
+        if isinstance(ref, peepdf.PDFCore.PDFString):
+            return {
+                "orig_code": self._parse_string("".join(ref.getJSCode())),
+                "beautified": self._parse_string(
+                    jsbeautify("".join(ref.getJSCode()))
+                ),
+                "urls": []
+            }
+
+        if not isinstance(ref, peepdf.PDFCore.PDFReference):
+            log.warning("PDFObject: can't follow type %s", ref)
+            return
+
         if ref.id not in f.body[version].objects:
             log.warning("PDFObject: Reference is broken, can't follow")
             return
 
         obj = f.body[version].objects[ref.id]
         return {
-            "orig_code": obj.object.decodedStream,
-            "beautified": jsbeautify(obj.object.decodedStream),
+            "orig_code": self._parse_string("".join(obj.object.getJSCode())),
+            "beautified": self._parse_string(
+                jsbeautify("".join(obj.object.getJSCode()))
+            ),
             "urls": []
         }
 
@@ -649,7 +676,7 @@ class PdfDocument(object):
             return action.value
 
         if isinstance(action, peepdf.PDFCore.PDFReference):
-            referenced = f.body[version].objects[action.id]
+            referenced = f.body[version].objects.get(action.id)
             if isinstance(referenced, peepdf.PDFCore.PDFIndirectObject):
                 obj = referenced.object
                 if isinstance(obj, peepdf.PDFCore.PDFDictionary):
@@ -668,7 +695,6 @@ class PdfDocument(object):
             return
 
         ret = []
-
         for version in xrange(f.updates + 1):
             md = f.getBasicMetadata(version)
             row = {
@@ -706,32 +732,6 @@ class PdfDocument(object):
 
         return ret
 
-class LnkHeader(Structure):
-    _fields_ = [
-        ("signature", ctypes.c_ubyte * 4),
-        ("guid", ctypes.c_ubyte * 16),
-        ("flags", ctypes.c_uint),
-        ("attrs", ctypes.c_uint),
-        ("creation", ctypes.c_ulonglong),
-        ("access", ctypes.c_ulonglong),
-        ("modified", ctypes.c_ulonglong),
-        ("target_len", ctypes.c_uint),
-        ("icon_len", ctypes.c_uint),
-        ("show_window", ctypes.c_uint),
-        ("hotkey", ctypes.c_uint),
-    ]
-
-class LnkEntry(Structure):
-    _fields_ = [
-        ("length", ctypes.c_uint),
-        ("first_offset", ctypes.c_uint),
-        ("volume_flags", ctypes.c_uint),
-        ("local_volume", ctypes.c_uint),
-        ("base_path", ctypes.c_uint),
-        ("net_volume", ctypes.c_uint),
-        ("path_remainder", ctypes.c_uint),
-    ]
-
 class LnkShortcut(object):
     signature = [0x4c, 0x00, 0x00, 0x00]
     guid = [
@@ -748,7 +748,7 @@ class LnkShortcut(object):
         "offline", "not_indexed", "encrypted",
     ]
 
-    def __init__(self, filepath):
+    def __init__(self, filepath=None):
         self.filepath = filepath
 
     def read_uint16(self, offset):
@@ -766,7 +766,7 @@ class LnkShortcut(object):
         return offset + 2 + length, ret
 
     def run(self):
-        self.buf = buf = open(self.filepath, "rb").read()
+        buf = self.buf = open(self.filepath, "rb").read()
         if len(buf) < ctypes.sizeof(LnkHeader):
             log.warning("Provided .lnk file is corrupted or incomplete.")
             return
@@ -791,7 +791,11 @@ class LnkShortcut(object):
                 ret["attrs"].append(self.attrs[x])
 
         offset = 78 + self.read_uint16(76)
-        off = LnkEntry.from_buffer_copy(buf[offset:offset+28])
+        if len(buf) < offset + 28:
+            log.warning("Provided .lnk file is corrupted or incomplete.")
+            return
+
+        off = LnkEntry.from_buffer_copy(buf[offset:offset + 28])
 
         # Local volume.
         if off.volume_flags & 1:
@@ -901,9 +905,10 @@ class ELF(object):
                     "tag": self._print_addr(
                         ENUM_D_TAG.get(tag.entry.d_tag, tag.entry.d_tag)
                     ),
-                    "type": tag.entry.d_tag[3:],
+                    "type": str(tag.entry.d_tag)[3:],
                     "value": self._parse_tag(tag),
                 })
+
         return dynamic_tags
 
     def _get_symbol_tables(self):
@@ -1006,9 +1011,9 @@ class ELF(object):
             parsed = "Library runpath: [%s]" % tag.runpath
         elif tag.entry.d_tag == "DT_SONAME":
             parsed = "Library soname: [%s]" % tag.soname
-        elif tag.entry.d_tag.endswith(("SZ", "ENT")):
+        elif isinstance(tag.entry.d_tag, basestring) and tag.entry.d_tag.endswith(("SZ", "ENT")):
             parsed = "%i (bytes)" % tag["d_val"]
-        elif tag.entry.d_tag.endswith(("NUM", "COUNT")):
+        elif isinstance(tag.entry.d_tag, basestring) and tag.entry.d_tag.endswith(("NUM", "COUNT")):
             parsed = "%i" % tag["d_val"]
         elif tag.entry.d_tag == "DT_PLTREL":
             s = describe_dyn_tag(tag.entry.d_val)
@@ -1027,7 +1032,7 @@ class Static(Processing):
     """Static analysis."""
 
     office_ext = [
-        "doc", "docm", "dotm", "docx", "ppt", "pptm", "pptx", "potm",
+        "doc", "docm", "dotm", "docx", "hwp", "ppt", "pptm", "pptx", "potm",
         "ppam", "ppsm", "xls", "xlsm", "xlsx",
     ]
 
@@ -1074,13 +1079,16 @@ class Static(Processing):
             static["wsf"] = WindowsScriptFile(f.file_path).run()
 
         if package in ("doc", "ppt", "xls") or ext in self.office_ext:
-            static["office"] = OfficeDocument(f.file_path).run()
+            static["office"] = OfficeDocument(f.file_path, self.task["id"]).run()
 
         if package == "pdf" or ext == "pdf":
-            static["pdf"] = dispatch(
-                _pdf_worker, (f.file_path,),
-                timeout=self.options.pdf_timeout
-            )
+            if f.get_content_type() == "application/pdf":
+                static["pdf"] = dispatch(
+                    _pdf_worker, (f.file_path,),
+                    timeout=self.options.pdf_timeout
+                ) or []
+            else:
+                static["pdf"] = []
 
         if package == "generic" or ext == "lnk":
             static["lnk"] = LnkShortcut(f.file_path).run()

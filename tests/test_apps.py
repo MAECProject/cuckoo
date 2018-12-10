@@ -718,6 +718,7 @@ class TestMigrateCWD(object):
         assert open(cwd("whitelist", "domain.txt"), "rb").read().strip() == (
             "# You can add whitelisted domains here."
         )
+        assert os.path.exists(cwd("yara", "dumpmem"))
         assert not os.path.exists(cwd("yara", "index_binaries.yar"))
 
     def test_using_community(self):
@@ -737,6 +738,15 @@ class TestMigrateCWD(object):
         set_cwd(tempfile.mktemp())
         shutil.copytree(os.path.expanduser("~/.cuckoo"), cwd())
         open(cwd(".cwd"), "wb").write("somethingelse")
+        migrate_cwd()
+
+    @pytest.mark.skipif("sys.platform == 'win32'")
+    def test_monitor_latest_symlink(self):
+        set_cwd(tempfile.mktemp())
+        cuckoo_create()
+        monitor = open(cwd("monitor", "latest"), "rb").read().strip()
+        os.unlink(cwd("monitor", "latest"))
+        os.symlink(cwd("monitor", monitor), cwd("monitor", "latest"))
         migrate_cwd()
 
 class TestCommunitySuggestion(object):

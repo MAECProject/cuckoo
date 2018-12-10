@@ -1,4 +1,4 @@
-# Copyright (C) 2017 Cuckoo Foundation.
+# Copyright (C) 2017-2018 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
@@ -287,7 +287,7 @@ def test_mark_config():
     rs = RunSignatures({
         "metadata": {},
     })
-    rs.signatures = sig(rs),
+    rs.signatures = sig(rs), sig(rs)
     rs.run()
     assert rs.results["metadata"] == {
         "cfgextr": [{
@@ -298,8 +298,6 @@ def test_mark_config():
             "url": [
                 "url1", "url2",
             ],
-            "key": None,
-            "type": None,
         }],
     }
 
@@ -326,6 +324,7 @@ def test_on_yara():
     )
 
     Database().connect()
+    ExtractManager._instances = {}
     results = RunProcessing(task=Dictionary({
         "id": 1,
         "category": "file",
@@ -334,6 +333,15 @@ def test_on_yara():
     assert results["target"]["file"]["yara"][0]["offsets"] == {
         "virtualpc": [(0, 0)],
     }
+    assert results["procmemory"][0]["regions"] == [{
+        "addr": "0x00400000",
+        "end": "0x00401000",
+        "offset": 24,
+        "protect": None,
+        "size": 4096,
+        "state": 0,
+        "type": 0,
+    }]
     assert results["procmemory"][0]["yara"][0]["offsets"] == {
         "vmcheckdll": [(24, 0)],
     }
@@ -356,13 +364,13 @@ def test_on_yara():
         def init(self):
             pass
 
-        def on_signature(self):
+        def on_signature(self, sig):
             pass
 
         def on_complete(self):
             pass
 
-        def on_extract(self):
+        def on_extract(self, match):
             pass
 
         on_yara = mock.MagicMock()
@@ -415,8 +423,9 @@ def test_on_extract():
         "pid": 1,
         "first_seen": 2,
         "program": "cmd",
-        "script": cwd("extracted", "0.bat", analysis=2),
+        "raw": cwd("extracted", "0.bat", analysis=2),
         "yara": [],
+        "info": {},
     }]
 
     class sig1(object):

@@ -1,6 +1,7 @@
 environment:
   matrix:
     - PYTHON: "C:/Python27"
+    - PYTHON: "C:/Python27-x64"
   global:
     MYSQL_PWD: Password12!
     POSTGRES_PORT: tcp://localhost:5432
@@ -17,6 +18,9 @@ install:
 
   # Fetch monitor & stuff which is required for setup & CWD migration tests.
   - "python.exe stuff/monitor.py"
+
+  # Bump the version of Cuckoo during tests (e.g., for new Signatures).
+  - "python.exe stuff/patch_version.py setup.py 3.0"
 
   - "python.exe setup.py sdist"
   - "pip.exe install -e ."
@@ -45,6 +49,7 @@ before_test:
 test_script:
   - "cuckoo.exe -d"
   - "cuckoo.exe community"
+  - "cuckoo.exe -d || dir >NUL"
   - "pytest.exe --cov=cuckoo"
 
 after_test:
