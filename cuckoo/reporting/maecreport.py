@@ -1,10 +1,7 @@
-# Copyright (c) 2017, The MITRE Corporation
-# All rights reserved.
-
-# MAEC 5.0 Cuckoo Report Module
-
+# Copyright (C) 2016 Cuckoo Foundation.
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
-# See the file "docs/LICENSE" for copying permission.
+# See the file 'docs/LICENSE' for copying permission.
+# MAEC 5.0 Cuckoo Report Module
 
 # NOTE: For use w/ Cuckoo 2.0.x you'll likely need to edit the "configuration"
 # dictionary in common/config.py in order for this module to work.
@@ -208,7 +205,8 @@ class MaecReport(Report):
         malwareInstance = {}
         if "target" in self.results and self.results['target']['category'] \
                 == 'file':
-            malwareInstance = self.create_malware_instance(self.results['target']['file'])
+            malwareInstance = self.create_malware_instance(self.results \
+                ['target']['file'])
 
             # Add dynamic features
             malwareInstance['dynamic_features'] = {}
@@ -223,8 +221,8 @@ class MaecReport(Report):
             # Instance's corresponding STIX file object
             if 'virustotal' in self.results and self.results['virustotal']:
                 file_obj_id = malwareInstance['instance_object_refs'][0]
-                self.package['observable_objects'][
-                    file_obj_id]['extensions'] = {}
+                self.package['observable_objects'][file_obj_id] \
+                    ['extensions'] = {}
                 self.package['observable_objects'][file_obj_id]['extensions'][
                     'x-maec-avclass'] =  \
                     self.create_avc_class_obj_list(self.results['virustotal'])
@@ -256,10 +254,12 @@ class MaecReport(Report):
             analysis_dict['analysis_type'] = 'dynamic'
             if 'machine' in self.results['info'] and \
                     'manager' in self.results['info']['machine']:
-                vm_obj = {'type': 'software','name': str(self.results['info']['machine']['manager'])}
+                vm_obj = {'type': 'software','name': (str(self.results['info']
+                    ['machine']['manager']))}
                 analysis_dict['vm_ref'] = self.deduplicate_obj(vm_obj)
             analysis_dict['tool_refs'] = [tool_id]
-            analysis_dict['description'] = str("Automated analysis conducted by Cuckoo Sandbox")
+            analysis_dict['description'] = str("Automated analysis conducted "
+            "by Cuckoo Sandbox")
             malwareInstance['analysis_metadata'] = [analysis_dict]
             self.primaryInstance = malwareInstance
 
@@ -329,6 +329,7 @@ class MaecReport(Report):
             file_obj['extensions'] = {}
             file_obj['extensions']['x-maec-avclass'] = \
                 self.create_avc_class_obj_list(cuckoo_file_dict['virustotal'])
+
         return (obj_id, file_obj)
 
     def create_directory_from_file_path(self, file_obj, path):
@@ -430,7 +431,8 @@ class MaecReport(Report):
             network_obj['type'] = 'ipv6-addr'
             obj['protocols'] = ['ipv6', 'tcp']
         # Test for a MAC address
-        elif re.match("^([0-9a-fA-F][0-9a-fA-F]:){5}([0-9a-fA-F][0-9a-fA-F])$", value):
+        elif re.match("^([0-9a-fA-F][0-9a-fA-F]:){5}([0-9a-fA-F][0-9a-fA-F])$",
+            value):
             network_obj['type'] = 'mac-addr'
         # Test for an IPv4 address
         elif re.match("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})"
@@ -483,11 +485,13 @@ class MaecReport(Report):
             if len(split_props) == 2:
                 if split_props[0] not in obj_dict:
                     val = {}
-                    val[split_props[1]] = arguments[mapping_entry['cuckoo_arg']]
+                    val[split_props[1]] = (arguments[mapping_entry
+                        ['cuckoo_arg']])
                     obj_dict[split_props[0]] = [val]
                 else:
                     prop = obj_dict[split_props[0]][0]
-                    prop[split_props[1]] = arguments[mapping_entry['cuckoo_arg']]
+                    prop[split_props[1]] = (arguments[mapping_entry
+                        ['cuckoo_arg']])
 
     def map_objects(self, action, objects_class, mapping, arguments):
         """Perform the mappings for input or output objects in an Action"""
@@ -526,10 +530,12 @@ class MaecReport(Report):
         elif obj['type'] == 'windows-registry-key':
             if 'regkey' in arguments and 'regkey_r' in arguments and \
                     'values' in obj:
-                obj['key'] = obj['key'].replace("\\" + arguments['regkey_r'],"").rstrip()
+                obj['key'] = obj['key'].replace("\\" + (arguments \
+                    ['regkey_r']),"").rstrip()
             elif 'regkey' in arguments and 'key_name' in arguments \
                     and 'values' in obj:
-                obj['key'] = obj['key'].replace("\\" + arguments['key_name'],"").rstrip()
+                obj['key'] = obj['key'].replace("\\" + (arguments \
+                ['key_name']),"").rstrip()
             # Do some post-processing on Registry Values
             if 'values' in obj and 'data_type' in obj['values'][0]:
                 obj['values'][0]['data_type'] = reg_datatype_mappings[
@@ -593,7 +599,8 @@ class MaecReport(Report):
                     if str(process['pid']) not in self.pidActionMap:
                         self.pidActionMap[str(process['pid'])] = [action_id]
                     else:
-                        process_actions = self.pidActionMap[str(process['pid'])]
+                        process_actions = self.pidActionMap[str(process['pid']
+                            )]
                         process_actions.append(action_id)
 
     def create_avc_class_obj_list(self, cuckoo_virusTotal_dict):
@@ -652,9 +659,11 @@ class MaecReport(Report):
         for process in processes:
             if 'ppid' in process and str(process['ppid']) in process_pids:
                 if str(process['ppid']) not in process_children:
-                    process_children[str(process['ppid'])] = [str(process['pid'])]
+                    process_children[str(process['ppid'])] = [str(process
+                        ['pid'])]
                 else:
-                    process_children[str(process['ppid'])].append(str(process['pid']))
+                    process_children[str(process['ppid'])].append(str(process
+                        ['pid']))
             # Add the Process Object if it doesn't exist
             # TODO: verify if this actually happens
             if str(process['pid']) not in self.pidObjectMap:
@@ -664,12 +673,15 @@ class MaecReport(Report):
             ppid = process['ppid']
             # This is the "root" process
             if str(ppid) not in process_pids:
-                node = self.create_process_tree_node(process, process_children, True)
+                node = self.create_process_tree_node(process, process_children,
+                    True)
                 process_tree_nodes.append(node)
             else:
-                node = self.create_process_tree_node(process, process_children, False)
+                node = self.create_process_tree_node(process, process_children,
+                    False)
                 process_tree_nodes.append(node)
-        self.primaryInstance['dynamic_features']['process_tree'] = process_tree_nodes
+        self.primaryInstance['dynamic_features']['process_tree'] = \
+            process_tree_nodes
 
     def add_signatures(self):
         """Add any signatures that were triggered during the analysis"""
@@ -718,12 +730,14 @@ class MaecReport(Report):
                                 'refined_capabilities'] = capability_mappings[
                                     name_chunk]['refined_capabilities']
                         else:
-                            names = [x['name'] for x in capability['refined_capabilities']]
+                            names = [x['name'] for x in (capability
+                                ['refined_capabilities'])]
                             if capability_mappings \
                                 [name_chunk]['refined_capabilities'][0] \
                                 ['name'] not \
                                     in names:
-                                        capability['refined_capabilities'].append(capability_mappings[name_chunk]
+                                        (capability['refined_capabilities']
+                                        ).append(capability_mappings[name_chunk]
                                                 ['refined_capabilities'][0])
                         if capability not in capabilities:
                             capabilities.append(capability)
