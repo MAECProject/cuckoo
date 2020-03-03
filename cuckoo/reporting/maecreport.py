@@ -289,6 +289,7 @@ class MaecReport(Report):
             relationship_dict['target_ref'] = malwareInstance['id']
             relationship_dict['relationship_type'] = 'drops'
             self.package['relationships'].append(relationship_dict)
+            self.package['maec_objects'].append(sort_dict(malwareInstance))
 
     def create_file_obj(self, cuckoo_file_dict):
         """Takes a Cuckoo file dictionary and returns a STIX file object and
@@ -297,10 +298,10 @@ class MaecReport(Report):
         file_obj = {
             "type": "file",
             "hashes": {
-                    "MD5": cuckoo_file_dict['md5'],
-                    "SHA-1": cuckoo_file_dict['sha1'],
-                    "SHA-256": cuckoo_file_dict['sha256'],
-                    "SHA-512": cuckoo_file_dict['sha512']
+                "MD5": cuckoo_file_dict['md5'],
+                "SHA-1": cuckoo_file_dict['sha1'],
+                "SHA-256": cuckoo_file_dict['sha256'],
+                "SHA-512": cuckoo_file_dict['sha512']
             },
             "size": cuckoo_file_dict['size'],
             "name": cuckoo_file_dict['name']
@@ -412,33 +413,33 @@ class MaecReport(Report):
         # address or domain name
         # Assume this is an HTTP URL
         if value.startswith("http://"):
-            split_val = val.replace("http://", "").split("/", 1)
+            split_val = value.replace("http://", "").split("/", 1)
             network_obj['type'] = 'domain-name'
             network_obj['value'] = split_val[0]
             http_resource = split_val[1]
         # Assume this is an FTP URL
         elif value.startswith("ftp://"):
-            split_val = val.replace("ftp://", "").split("/", 1)
+            split_val = value.replace("ftp://", "").split("/", 1)
             network_obj['type'] = 'domain-name'
             network_obj['value'] = split_val[0]
         # Assume this is an HTTPS URL
         elif value.startswith("https://"):
-            split_val = val.replace("htps://", "").split("/", 1)
+            split_val = value.replace("https://", "").split("/", 1)
             network_obj['type'] = 'domain-name'
             network_obj['value'] = split_val[0]
             http_resource = split_val[1]
         # Test for an IPv6 address
-        elif re.match("^([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}$", value):
+        elif re.match(r"^([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}$", value):
             network_obj['type'] = 'ipv6-addr'
             obj['protocols'] = ['ipv6', 'tcp']
         # Test for a MAC address
-        elif re.match("^([0-9a-fA-F][0-9a-fA-F]:){5}([0-9a-fA-F][0-9a-fA-F])$",
-            value):
+        elif re.match(r"^([0-9a-fA-F][0-9a-fA-F]:){5}([0-9a-fA-F][0-9a-fA-F])$",
+                      value):
             network_obj['type'] = 'mac-addr'
         # Test for an IPv4 address
-        elif re.match("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})"
-                      "(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]"
-                      "|[0-9]{1,2})){3}$", value):
+        elif re.match(r"^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[0-9]{1,2})"
+                      r"(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]"
+                      r"|[0-9]{1,2})){3}$", value):
             network_obj['type'] = 'ipv4-addr'
             obj['protocols'] = ['ipv4', 'tcp']
         else:
@@ -543,7 +544,7 @@ class MaecReport(Report):
                     str(obj['values'][0]['data_type'])]
         elif obj['type'] == 'process':
             if 'filepath' in arguments:
-                file_obj = {"name": arguments['filepath']}
+                file_obj = {"name": arguments['filepath'], "type": "file"}
                 self.create_directory_from_file_path(
                     file_obj, file_obj['name'])
                 obj['binary_ref'] = self.deduplicate_obj(file_obj)
