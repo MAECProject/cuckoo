@@ -612,18 +612,22 @@ class MaecReport(Report):
         meant to be nested in a STIX file object to its "extensions" field
         """
         avClassList = []
-        for vendor, scan_obj in cuckoo_virusTotal_dict['scans'].items():
+        for vendor, scan_obj in cuckoo_virusTotal_dict.get('scans', {}).items():
             # Only grabbing scan information if the vendor detected the scan
             # object
-            if scan_obj['detected']:
+            if scan_obj.get('detected', False):
                 avClassObj = {}
-                avClassObj['scan_date'] = cuckoo_virusTotal_dict['scan_date']
-                avClassObj['is_detected'] = scan_obj['detected']
-                avClassObj['classification_name'] = scan_obj['result']
+                avClassObj['scan_date'] = cuckoo_virusTotal_dict['scan_date']  # required
                 avClassObj['av_name'] = vendor
                 avClassObj['av_vendor'] = vendor
-                avClassObj['av_version'] = scan_obj['version']
-                avClassObj['av_definition_version'] = scan_obj['update']
+                if 'detected' in scan_obj:
+                    avClassObj['is_detected'] = scan_obj['detected']
+                if 'result' in scan_obj:
+                    avClassObj['classification_name'] = scan_obj['result']
+                if 'version' in scan_obj:
+                    avClassObj['av_version'] = scan_obj['version']
+                if 'update' in scan_obj:
+                    avClassObj['av_definition_version'] = scan_obj['update']
                 avClassList.append(avClassObj)
         return avClassList
 
